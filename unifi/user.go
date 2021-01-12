@@ -3,6 +3,12 @@ package unifi
 import (
 	"context"
 	"fmt"
+
+	"github.com/hashicorp/go-version"
+)
+
+var (
+	controllerV6_0_43 = version.Must(version.NewVersion("6.0.43"))
 )
 
 // GetUserByMAC returns slightly different information than GetUser, as they
@@ -143,5 +149,29 @@ func (c *Client) GetUser(ctx context.Context, site, id string) (*User, error) {
 }
 
 func (c *Client) UpdateUser(ctx context.Context, site string, d *User) (*User, error) {
-	return c.updateUser(ctx, site, d)
+	switch v, _ := version.NewVersion(c.version); {
+	case v.GreaterThanOrEqual(controllerV6_0_43):
+		return c.updateUser6_0_43(ctx, site, d)
+	default:
+		return c.updateUser(ctx, site, d)
+	}
+}
+
+func (c *Client) updateUser6_0_43(ctx context.Context, site string, d *User) (*User, error) {
+	var respBody struct {
+		Meta meta   `json:"meta"`
+		Data []User `json:"data"`
+	}
+
+	err := c.do(ctx, "PUT", fmt.Sprintf("s/%s/rest/user/%s", site, d.ID), d, &respBody)
+	if err != nil {
+		return nil, err
+	}
+
+	user, err := c.GetUser(ctx, site, d.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	return user, nil
 }
