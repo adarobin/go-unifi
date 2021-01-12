@@ -142,16 +142,23 @@ func (c *Client) Login(ctx context.Context, user, pass string) error {
 
 	var status struct {
 		Meta struct {
-			ServerVersion string `json:"server_version"`
-			UUID          string `json:"uuid"`
+			ServerVersion *string `json:"server_version"`
+			UUID          string  `json:"uuid"`
 		} `json:"meta"`
 	}
 
+	status401 := false
 	err = c.do(ctx, "GET", c.statusPath, nil, &status)
 	if err != nil {
-		return err
+		//The UDMP requires authentication for the status endpoint in newer versions
+		//Instead of erroring on a 401, attempt again after authentication
+		if !strings.Contains(err.Error(), "(401 Unauthorized)") {
+			return err
+		}
+		status401 = true
+	} else {
+		c.version = *status.Meta.ServerVersion
 	}
-	c.version = status.Meta.ServerVersion
 
 	err = c.do(ctx, "POST", c.loginPath, &struct {
 		Username string `json:"username"`
@@ -162,6 +169,20 @@ func (c *Client) Login(ctx context.Context, user, pass string) error {
 	}, nil)
 	if err != nil {
 		return err
+	}
+
+	if status401 {
+		err = c.do(ctx, "GET", c.statusPath, nil, &status)
+		if err != nil {
+			return err
+		}
+
+		if status.Meta.ServerVersion != nil {
+			c.version = *status.Meta.ServerVersion
+		} else {
+			//UDMP doesn't return a version on firmware 1.8.5 (and maybe others?)
+			c.version = "6.0.43"
+		}
 	}
 
 	return nil
